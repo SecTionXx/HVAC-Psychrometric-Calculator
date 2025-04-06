@@ -1,0 +1,5 @@
+# psychro_project/requirements.txt
+psychrolib>=2.5.0
+streamlit>=1.0.0
+pandas>=1.0.0
+matplotlib>=3.0.0

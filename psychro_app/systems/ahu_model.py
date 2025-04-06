@@ -42,8 +42,9 @@ class AHUModel:
 
     def run_cooling_cycle(self, oa_mass_flow: float, ra_mass_flow: float,
                          cc_adp: float, cc_bf: float,
-                         reheat_q_watts: float = 0, # Added Reheat
-                         humidifier_water_kg_s: float = 0, # Added Humidifier
+                         reheat_q_watts: float = 0,
+                         humidifier_type: str = "None", # Ensure this parameter exists
+                         humidifier_param: float = 0, # Ensure this parameter exists
                          fan_heat_watts: float = 0) -> bool:
         """
         Simulates AHU cooling cycle with optional reheat and humidification.
@@ -79,13 +80,17 @@ class AHUModel:
         else:
             self.states["HC_Out"] = current_state # Pass through if no reheat
 
-        # 4. Humidification (If applicable)
-        if humidifier_water_kg_s > 0:
-            self.states["HUM_Out"] = hvac.steam_humidify(current_state, total_flow, humidifier_water_kg_s)
+        # 4. Humidification (If applicable) - Choose type
+        if humidifier_type == "Steam" and humidifier_param > 0:
+            self.states["HUM_Out"] = hvac.steam_humidify(current_state, total_flow, humidifier_param)
+            if not self.states["HUM_Out"]: return False
+            current_state = self.states["HUM_Out"]
+        elif humidifier_type == "Adiabatic" and humidifier_param > 0:
+            self.states["HUM_Out"] = hvac.adiabatic_humidify(current_state, humidifier_param)
             if not self.states["HUM_Out"]: return False
             current_state = self.states["HUM_Out"]
         else:
-             self.states["HUM_Out"] = current_state # Pass through if no humidification
+             self.states["HUM_Out"] = current_state # Pass through if no humidification or param is zero
 
         # 5. Supply Fan Heat Gain
         if fan_heat_watts > 0:
@@ -99,7 +104,8 @@ class AHUModel:
 
     def run_heating_cycle(self, oa_mass_flow: float, ra_mass_flow: float,
                          heating_q_sensible: float,
-                         humidifier_water_kg_s: float = 0, # Added Humidifier
+                         humidifier_type: str = "None", # Ensure this parameter exists
+                         humidifier_param: float = 0, # Ensure this parameter exists
                          fan_heat_watts: float = 0) -> bool:
         """
         Simulates AHU heating cycle with optional humidification.
@@ -131,9 +137,13 @@ class AHUModel:
         else:
              self.states["HC_Out"] = current_state # Pass through if no heating
 
-        # 4. Humidification (If applicable)
-        if humidifier_water_kg_s > 0:
-            self.states["HUM_Out"] = hvac.steam_humidify(current_state, total_flow, humidifier_water_kg_s)
+        # 4. Humidification (If applicable) - Choose type
+        if humidifier_type == "Steam" and humidifier_param > 0:
+            self.states["HUM_Out"] = hvac.steam_humidify(current_state, total_flow, humidifier_param)
+            if not self.states["HUM_Out"]: return False
+            current_state = self.states["HUM_Out"]
+        elif humidifier_type == "Adiabatic" and humidifier_param > 0:
+            self.states["HUM_Out"] = hvac.adiabatic_humidify(current_state, humidifier_param)
             if not self.states["HUM_Out"]: return False
             current_state = self.states["HUM_Out"]
         else:

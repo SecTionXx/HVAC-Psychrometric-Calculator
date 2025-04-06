@@ -18,6 +18,7 @@ try:
     from psychro_app.utils.plotter import plot_psychro_chart, plot_points, plot_process, plot_shr_line # Ensure plot_shr_line is imported
     from psychro_app.utils import constants
     from psychro_app.processes import hvac_processes as hvac
+    from psychro_app.core import psychrolib_wrapper as psy_wrap # Import psychrolib wrapper
 except ModuleNotFoundError:
     st.error(
         "Fatal Error: Could not find the 'psychro_app' backend package.\n"
@@ -100,6 +101,8 @@ if 'current_pressure_pa' not in st.session_state: st.session_state.current_press
 if 'calculated_metrics' not in st.session_state: st.session_state.calculated_metrics = {}
 if 'direct_calc_result' not in st.session_state: st.session_state.direct_calc_result = None
 if 'last_total_flow' not in st.session_state: st.session_state.last_total_flow = 0
+if 'altitude_m' not in st.session_state: st.session_state.altitude_m = 0 # Default altitude
+if 'use_altitude' not in st.session_state: st.session_state.use_altitude = False # Default to direct pressure input
 
 # --- Helper functions ---
 def calculate_fan_heat(mass_flow_kg_s, fan_temp_rise_c, air_state):
@@ -160,8 +163,64 @@ st.divider()
 with st.sidebar:
     st.header("⚙️ Simulation Configuration")
     st.markdown("*(1) Select System & Mode*")
-    st.session_state.current_pressure_pa = st.number_input( "Atmospheric Pressure (Pa)", min_value=80000, max_value=120000, value=int(st.session_state.current_pressure_pa), step=100, help=f"Standard: {constants.STANDARD_PRESSURE_PA:.0f} Pa.", key="pressure_input_sidebar")
-    pressure_pa = st.session_state.current_pressure_pa
+
+    # --- Altitude/Pressure Input ---
+    st.session_state.use_altitude = st.toggle("Calculate Pressure from Altitude", value=st.session_state.use_altitude, key="use_altitude_toggle")
+
+    if st.session_state.use_altitude:
+        st.session_state.altitude_m = st.number_input(
+            "Altitude (m)",
+            min_value=-500,
+            max_value=10000,
+            value=st.session_state.altitude_m,
+            step=50,
+            key="altitude_input",
+            help="Enter site altitude above sea level in meters."
+        )
+        try:
+            calculated_pressure = psy_wrap.psy.GetStandardAtmPressure(st.session_state.altitude_m)
+            st.session_state.current_pressure_pa = calculated_pressure
+            st.number_input(
+                "Atmospheric Pressure (Pa)",
+                min_value=1000, # Lower min for high altitude
+                max_value=120000,
+                value=int(st.session_state.current_pressure_pa),
+                step=100,
+                key="pressure_display_sidebar",
+                help=f"Calculated from {st.session_state.altitude_m} m altitude.",
+                disabled=True # Make read-only when calculated
+            )
+        except Exception as e:
+            st.error(f"Could not calculate pressure from altitude: {e}")
+            # Fallback to manual input if calculation fails
+            st.session_state.current_pressure_pa = st.number_input(
+                "Atmospheric Pressure (Pa)",
+                min_value=80000,
+                max_value=120000,
+                value=int(constants.STANDARD_PRESSURE_PA), # Default if error
+                step=100,
+                key="pressure_input_sidebar_fallback",
+                help="Enter pressure manually (calculation failed)."
+            )
+            st.session_state.use_altitude = False # Revert toggle state on error
+            st.rerun() # Rerun to update the UI state correctly
+    else:
+        # Keep altitude stored even if not used, reset pressure if switching back
+        st.session_state.current_pressure_pa = st.number_input(
+            "Atmospheric Pressure (Pa)",
+            min_value=80000,
+            max_value=120000,
+            value=int(st.session_state.current_pressure_pa), # Use last known value
+            step=100,
+            key="pressure_input_sidebar_manual",
+            help=f"Standard sea level: {constants.STANDARD_PRESSURE_PA:.0f} Pa."
+        )
+        # Optionally display the altitude input greyed out
+        st.number_input("Altitude (m)", value=st.session_state.altitude_m, key="altitude_display", disabled=True)
+
+
+    pressure_pa = st.session_state.current_pressure_pa # Use the determined pressure
+
     system_type = st.radio("System Type:", ('AHU', 'FCU'), key="system_type_radio", horizontal=True)
     if system_type == 'AHU': mode = st.radio("AHU Mode:", ('Cooling', 'Heating'), key="ahu_mode_radio", horizontal=True)
     elif system_type == 'FCU': mode = st.radio("FCU Mode:", ('Cooling', 'Heating'), key="fcu_mode_radio", horizontal=True)

@@ -81,17 +81,18 @@ def plot_psychro_chart(pressure_pa: float,
             ax.plot(temps_rh, w_rh, color='blue', linestyle='-', linewidth=0.6, alpha=0.7) # Thinner, slightly transparent
             # Add RH labels (Improved placement attempt)
             try:
-                 # Try placing near right edge, vertically centered on the line within bounds
+                # Try placing near right edge, vertically centered on the line within bounds
                 target_x_factor = 0.85 # Place label towards 85% of x-range
                 idx = min(range(len(temps_rh)), key=lambda i: abs(temps_rh[i] - (tdb_range[0] + (tdb_range[1]-tdb_range[0])*target_x_factor)))
 
                 label_x = temps_rh[idx]
                 label_y = w_rh[idx]
                 if label_x < tdb_range[1] and label_y < w_range[1]*0.98 and label_y > w_range[0]: # Check bounds
-                      ax.text(label_x, label_y, f'{rh_target*100:.0f}%', rotation=30,
-                              ha='left', va='bottom', color='blue', fontsize=7, alpha=0.8,
-                              bbox=dict(boxstyle='round,pad=0.1', fc='white', alpha=0.6, ec='none')) # Semi-transparent background
-            except (IndexError, ValueError): pass
+                    ax.text(label_x, label_y, f'{rh_target*100:.0f}%', rotation=30,
+                            ha='left', va='bottom', color='blue', fontsize=7, alpha=0.8,
+                            bbox=dict(boxstyle='round,pad=0.1', fc='white', alpha=0.6, ec='none')) # Semi-transparent background
+            except (IndexError, ValueError): 
+                pass
 
     # Constant Enthalpy lines - Lighter green, dashed, fainter
     h_bl = psy_wrap.psy.GetMoistAirEnthalpy(tdb_range[0], w_range[0])
@@ -105,30 +106,31 @@ def plot_psychro_chart(pressure_pa: float,
         if h_target < -50000 or h_target > 200000:  # Reasonable enthalpy bounds
             log.warning(f"Skipping enthalpy line {h_target} J/kg - outside reasonable range")
             continue
-         temps_h = []
-         ws_h = []
-         for t in np.linspace(tdb_range[0], tdb_range[1], 50):
-             try:
-                 _w = psy_wrap.psy.GetHumRatioFromEnthalpyAndTDryBulb(h_target, t)
-                 # Check if within plot bounds, slightly extended
-                 if w_range[0] * 0.95 <= _w <= w_range[1] * 1.05:
+        temps_h = []  # Fixed indentation
+        ws_h = []     # Fixed indentation
+        for t in np.linspace(tdb_range[0], tdb_range[1], 50):
+            try:
+                _w = psy_wrap.psy.GetHumRatioFromEnthalpyAndTDryBulb(h_target, t)
+                # Check if within plot bounds, slightly extended
+                if w_range[0] * 0.95 <= _w <= w_range[1] * 1.05:
                     temps_h.append(t)
                     ws_h.append(_w)
-             except ValueError: pass
-             except Exception as e: log.error(f"Error h line: {e}"); pass
-         if temps_h:
-             ax.plot(temps_h, ws_h, color='green', linestyle='--', linewidth=0.6, alpha=0.6) # Dashed, thinner, fainter
+            except ValueError: pass
+            except Exception as e: log.error(f"Error h line: {e}"); pass
+        if temps_h:
+            ax.plot(temps_h, ws_h, color='green', linestyle='--', linewidth=0.6, alpha=0.6) # Dashed, thinner, fainter
              # Add enthalpy labels (Improved placement attempt)
-             try:
-                  # Try placing near top edge, horizontally centered on line within bounds
+            try:
+                # Try placing near top edge, horizontally centered on line within bounds
                 idx = min(range(len(ws_h)), key=lambda i: abs(ws_h[i] - w_range[1]*0.9)) # Find point near top
                 label_x = temps_h[idx]
                 label_y = ws_h[idx]
                 if tdb_range[0]*1.02 < label_x < tdb_range[1]*0.98 and label_y < w_range[1]: # Check bounds
-                      ax.text(label_x, label_y, f'{h_target/1000:.0f} kJ/kg', rotation=-30,
-                              ha='center', va='bottom', color='green', fontsize=7, alpha=0.7,
-                              bbox=dict(boxstyle='round,pad=0.1', fc='white', alpha=0.6, ec='none'))
-             except (IndexError, ValueError): pass
+                    ax.text(label_x, label_y, f'{h_target/1000:.0f} kJ/kg', rotation=-30,
+                            ha='center', va='bottom', color='green', fontsize=7, alpha=0.7,
+                            bbox=dict(boxstyle='round,pad=0.1', fc='white', alpha=0.6, ec='none'))
+            except (IndexError, ValueError): 
+                pass
 
 
     # Axes and Labels

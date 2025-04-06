@@ -2,6 +2,9 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from psychro_app.core import psychrolib_wrapper as psy_wrap
+from psychro_app.core.air_state import AirState 
+from psychro_app.utils import constants
+from psychro_app.processes import hvac_processes as hvac
 import logging
 
 log = logging.getLogger(__name__)
@@ -12,7 +15,30 @@ DEFAULT_W_RANGE = (0, 0.030)
 def plot_psychro_chart(pressure_pa: float,
                         tdb_range: tuple = DEFAULT_TDB_RANGE,
                         w_range: tuple = DEFAULT_W_RANGE) -> tuple[plt.Figure, plt.Axes]:
-    """Creates the background psychrometric chart using Matplotlib."""
+    """Creates the background psychrometric chart using Matplotlib.
+    
+    Key formulas used:
+    1. Saturation humidity ratio (W_s):
+        - W_s = 0.622 * (Pws / (P - Pws))
+        where: Pws = saturation vapor pressure, P = atmospheric pressure
+    
+    2. Relative humidity lines:
+        - W = (RH * W_s)
+        where: RH = target relative humidity (0.1 to 1.0)
+    
+    3. Enthalpy lines (h):
+        - h = 1.006 * t + W * (2501 + 1.86 * t)
+        where: t = dry bulb temp, W = humidity ratio
+    """
+    if not (1000 <= pressure_pa <= 120000):  # Valid pressure range check
+        raise ValueError(f"Pressure {pressure_pa} Pa is outside valid range")
+    
+    # Validate temperature and humidity ratio ranges
+    if not (-100 <= tdb_range[0] < tdb_range[1] <= 100):
+        raise ValueError("Invalid temperature range")
+    if not (0 <= w_range[0] < w_range[1] <= 0.1):
+        raise ValueError("Invalid humidity ratio range")
+
     log.info(f"Generating psychrometric chart at {pressure_pa} Pa")
     fig, ax = plt.subplots(figsize=(11, 8)) # Slightly adjusted size
 
@@ -21,13 +47,19 @@ def plot_psychro_chart(pressure_pa: float,
     temps_sat = np.linspace(tdb_range[0], tdb_range[1], 100)
     w_sat = []
     valid_temps_sat = []
+    # Enhanced saturation line validation
     for t in temps_sat:
-        w = psy_wrap.get_sat_hum_ratio(t, pressure_pa)
-        if w is not None and w_range[0] <= w <= w_range[1] * 1.05: # Extend slightly beyond top range
-            # Prevent plotting wildly high W if pressure is low / temp high
-            if len(w_sat) > 0 and w > w_sat[-1] * 3: continue # Basic sanity check
-            w_sat.append(w)
-            valid_temps_sat.append(t)
+        try:
+            w = psy_wrap.get_sat_hum_ratio(t, pressure_pa)
+            if w is not None and w_range[0] <= w <= w_range[1] * 1.05: # Extend slightly beyond top range
+                # Prevent plotting wildly high W if pressure is low / temp high
+                if len(w_sat) > 0 and w > w_sat[-1] * 3:
+                    log.warning(f"Suspicious jump in saturation line at T={t}°C")
+                    continue # Basic sanity check
+                w_sat.append(w)
+                valid_temps_sat.append(t)
+        except Exception as e:
+            log.error(f"Error calculating saturation point at {t}°C: {e}")
     if valid_temps_sat:
         ax.plot(valid_temps_sat, w_sat, color='black', linewidth=1.5, label='Saturation (100% RH)') # Add label
     else:
@@ -70,6 +102,9 @@ def plot_psychro_chart(pressure_pa: float,
     # Adjust number of lines based on range? For now, fixed number.
     num_h_lines = 7
     for h_target in np.linspace(h_start, h_end, num_h_lines):
+        if h_target < -50000 or h_target > 200000:  # Reasonable enthalpy bounds
+            log.warning(f"Skipping enthalpy line {h_target} J/kg - outside reasonable range")
+            continue
          temps_h = []
          ws_h = []
          for t in np.linspace(tdb_range[0], tdb_range[1], 50):
@@ -120,7 +155,13 @@ def plot_psychro_chart(pressure_pa: float,
     return fig, ax
 
 def plot_points(ax: plt.Axes, air_states: list):
-    """Plots AirState points on the chart and adds them to the legend."""
+    """Plots AirState points on the chart and adds them to the legend.
+    
+    Each point represents a thermodynamic state with properties:
+    - tdb: Dry bulb temperature (°C)
+    - w: Humidity ratio (kg/kg)
+    - Additional properties from AirState (RH, h, etc.)
+    """
     if not hasattr(ax, 'plot'): return
 
     point_marker_size = 7
@@ -168,7 +209,23 @@ def plot_points(ax: plt.Axes, air_states: list):
 def plot_process(ax: plt.Axes, process_states: list | None, color='grey', style='-', linewidth=1.5):
     """
     Plots a process line connecting AirStates WITHOUT adding to legend.
-
+    
+    Process lines represent thermodynamic processes with these key formulas:
+    1. Sensible Heat (constant W):
+        Q = m * cp * (T2 - T1)
+        where: cp = 1006 + 1860*W [J/kg-K]
+    
+    2. Total Heat:
+        Q = m * (h2 - h1)
+        where: h = 1006*T + W*(2501000 + 1860*T) [J/kg]
+    
+    3. Latent Heat (constant T):
+        Q = m * hfg * (W2 - W1)
+        where: hfg ≈ 2501000 [J/kg]
+    
+    4. Sensible Heat Ratio (SHR):
+        SHR = Qsensible / Qtotal
+    
     Args:
         ax: The matplotlib Axes object.
         process_states: List containing two AirState objects [start, end].
@@ -183,25 +240,111 @@ def plot_process(ax: plt.Axes, process_states: list | None, color='grey', style=
 
     start_state, end_state = process_states[0], process_states[1]
 
-    # Check if states are valid and different enough to plot
-    if (start_state and end_state and start_state.is_valid() and end_state.is_valid() and
-        (abs(start_state.tdb - end_state.tdb) > 0.01 or abs(start_state.w - end_state.w) > 1e-7)):
+    # Enhanced validation with process type identification
+    if (start_state and end_state and start_state.is_valid() and end_state.is_valid()):
+        delta_t = abs(start_state.tdb - end_state.tdb)
+        delta_w = abs(start_state.w - end_state.w)
+        
+        # Skip if changes are too small to plot meaningfully
+        if delta_t <= 0.01 and delta_w <= 1e-7:
+            log.debug(f"Changes too small to plot: ΔT={delta_t:.3f}°C, ΔW={delta_w*1000:.3f}g/kg")
+            return
+            
+        # Identify process type for logging
+        process_type = "Unknown"
+        if delta_w < 1e-7:  # Constant humidity ratio
+            process_type = "Sensible Only"
+        elif delta_t < 0.01:  # Constant temperature
+            process_type = "Latent Only"
+        else:
+            # Calculate SHR if possible
+            try:
+                delta_h = end_state.h - start_state.h
+                cp_avg = 1006 + 1860 * ((start_state.w + end_state.w) / 2)
+                q_sensible = cp_avg * delta_t
+                shr = abs(q_sensible / delta_h) if abs(delta_h) > 0 else 1.0
+                process_type = f"Combined (SHR≈{shr:.2f})"
+            except Exception as e:
+                log.warning(f"Could not calculate SHR: {e}")
 
         tdbs = [start_state.tdb, end_state.tdb]
         ws = [start_state.w, end_state.w]
-        label_desc = f"{start_state.label} -> {end_state.label}" # For logging
+        label_desc = f"{start_state.label} -> {end_state.label} ({process_type})"
 
         # Plot line WITHOUT label for legend
         ax.plot(tdbs, ws, color=color, linestyle=style, linewidth=linewidth,
-                marker='', zorder=5) # Lower zorder than points
+                marker='', zorder=5)
 
         # Add arrow using annotate
         try:
-             ax.annotate('', xy=(tdbs[1], ws[1]), xytext=(tdbs[0], ws[0]),
-                         arrowprops=dict(arrowstyle="->", color=color, lw=linewidth*0.8), # Slightly thinner arrow
-                         va='center', ha='center', zorder=6)
-             log.info(f"Plotted process line: {label_desc}")
+            ax.annotate('', xy=(tdbs[1], ws[1]), xytext=(tdbs[0], ws[0]),
+                        arrowprops=dict(arrowstyle="->", color=color, lw=linewidth*0.8),
+                        va='center', ha='center', zorder=6)
+            log.info(f"Plotted process line: {label_desc}")
         except Exception as e:
-             log.error(f"Failed to draw arrow for process {label_desc}: {e}")
+            log.error(f"Failed to draw arrow for process {label_desc}: {e}")
     else:
-        log.debug(f"Skipping process plot from {start_state.label if start_state else 'N/A'} to {end_state.label if end_state else 'N/A'}")
+        log.debug(f"Invalid states for process line from {start_state.label if start_state else 'N/A'} to {end_state.label if end_state else 'N/A'}")
+
+def plot_shr_line(ax: plt.Axes, start_state: AirState, shr: float, color='magenta', linestyle=':'):
+    """
+    Plots the Sensible Heat Ratio (SHR) line originating from a start state.
+    
+    Args:
+        ax: The matplotlib Axes object.
+        start_state: The AirState object where the cooling process begins (e.g., MA).
+        shr (float): The Sensible Heat Ratio (typically 0 to 1).
+        color (str): Line color.
+        linestyle (str): Line style.
+    """
+    if not start_state or not start_state.is_valid() or not (0 <= shr <= 1.1):
+        log.warning(f"Cannot plot SHR line from invalid state or invalid SHR ({shr=}).")
+        return
+
+    try:
+        cp = hvac.calculate_cp_moist_air(start_state.w)
+        h_fg = constants.H_FG_WATER_0C
+
+        if abs(shr) < 1e-6:  # Pure latent cooling
+            slope_dw_dt = float('inf')
+        elif abs(1 - shr) < 1e-6:  # Pure sensible cooling
+            slope_dw_dt = 0.0
+        else:
+            slope_dw_dt = (cp * (1.0 - shr)) / (h_fg * shr)
+    except (ZeroDivisionError, TypeError):
+        log.error(f"Could not calculate SHR slope for SHR={shr}")
+        return
+
+    # Get plot boundaries
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+    tdb_start = start_state.tdb
+    w_start = start_state.w
+
+    # Calculate intersections with plot boundaries
+    points = []
+    if slope_dw_dt != float('inf'):
+        # Calculate horizontal intersections
+        w_at_xmin = w_start + slope_dw_dt * (xlim[0] - tdb_start)
+        w_at_xmax = w_start + slope_dw_dt * (xlim[1] - tdb_start)
+        if ylim[0] <= w_at_xmin <= ylim[1]: points.append((xlim[0], w_at_xmin))
+        if ylim[0] <= w_at_xmax <= ylim[1]: points.append((xlim[1], w_at_xmax))
+
+    if abs(slope_dw_dt) > 1e-9:
+        # Calculate vertical intersections
+        t_at_ymin = tdb_start + (ylim[0] - w_start) / slope_dw_dt
+        t_at_ymax = tdb_start + (ylim[1] - w_start) / slope_dw_dt
+        if xlim[0] <= t_at_ymin <= xlim[1]: points.append((t_at_ymin, ylim[0]))
+        if xlim[0] <= t_at_ymax <= xlim[1]: points.append((t_at_ymax, ylim[1]))
+
+    if len(points) >= 2:
+        points.sort()  # Sort by temperature
+        final_points = [points[0], points[-1]]
+        line_tdbs = [p[0] for p in final_points]
+        line_ws = [p[1] for p in final_points]
+
+        ax.plot(line_tdbs, line_ws, color=color, linestyle=linestyle, linewidth=1.0,
+                label=f"SHR Line ({shr:.2f})", zorder=4)
+        log.info(f"Plotted SHR line (SHR={shr:.3f}) from Tdb={tdb_start:.1f}, W={w_start:.5f}")
+    else:
+        log.warning(f"Could not determine valid boundary points for SHR line (SHR={shr:.3f}).")

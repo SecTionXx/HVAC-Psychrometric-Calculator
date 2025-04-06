@@ -31,7 +31,23 @@ A Streamlit web application for HVAC psychrometric calculations and visualizatio
    - Set Main file path to: `streamlit_app.py`
    - Click "Deploy"
 
-3. **Environment Variables**
+3. **Troubleshooting Deployment**
+
+   - If you encounter ModuleNotFoundError:
+     - Verify requirements.txt is in the root directory
+     - Check if all dependencies are listed with correct versions
+     - Try redeploying after clearing the cache
+   - For matplotlib issues:
+     - Add this at the start of streamlit_app.py:
+       ```python
+       import matplotlib
+       matplotlib.use('Agg')
+       ```
+   - If problems persist:
+     - Check Streamlit Cloud logs in the "Manage app" section
+     - Try deploying with minimal requirements first, then add more
+
+4. **Environment Variables**
    - No environment variables required for basic deployment
 
 ## Local Development

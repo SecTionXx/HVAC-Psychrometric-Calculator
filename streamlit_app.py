@@ -6,6 +6,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import logging
 import json # Might be used for Save/Load later
+import matplotlib
+matplotlib.use('Agg')  # Set backend before importing pyplot
 
 # --- Import backend modules ---
 # Ensure Python can find the 'psychro_app' package
@@ -129,10 +131,10 @@ with st.expander("POINT CALCULATOR: Find Air Properties", expanded=False):
     key1, key2 = input_pair_options[selected_pair_label]
     col_calc1, col_calc2 = st.columns(2)
     with col_calc1:
-        label1 = f"{key1.upper()}"; unit1 = "°C" if 't' in key1 else ("(0-1)" if key1=='rh' else ("(kg/kg)" if key1=='w' else ("(J/kg)" if key1=='h' else ""))); default1 = 25.0 if 'tdb' in key1 else (0.5 if key1=='rh' else (20.0 if 'twb' in key1 else (15.0 if 'tdp' in key1 else (0.01 if key1=='w' else 50000.0))))
+        label1 = f"{key1.upper()}"; unit1 = "°C" if 't' in key1 else ("(0-1)" if key1=='rh' else ("(kg/kg)" if key1=='w' else ("(J/kg)" if key1=='h' else ""))); default1 = 25.0 if 'tdb' in key1 else (0.5 if key1=='rh' else (20.0 if 'twb' in key1 else (15.0 if 'tdp' else (0.01 if key1=='w' else 50000.0))))
         val1 = st.number_input(f"Value 1: {label1} {unit1}", value=default1, format="%.4f", key="calc_val1")
     with col_calc2:
-        label2 = f"{key2.upper()}"; unit2 = "°C" if 't' in key2 else ("(0-1)" if key2=='rh' else ("(kg/kg)" if key2=='w' else ("(J/kg)" if key2=='h' else ""))); default2 = 0.5 if key2=='rh' else (20.0 if 'twb' in key2 else (15.0 if 'tdp' in key2 else (0.01 if key2=='w' else 50000.0)))
+        label2 = f"{key2.upper()}"; unit2 = "°C" if 't' in key2 else ("(0-1)" if key2=='rh' else ("(kg/kg)" if key2=='w' else ("(J/kg)" if key2=='h' else ""))); default2 = 0.5 if key2=='rh' else (20.0 if 'twb' in key2 else (15.0 if 'tdp' else (0.01 if key2=='w' else 50000.0)))
         val2 = st.number_input(f"Value 2: {label2} {unit2}", value=default2, format="%.4f", key="calc_val2")
     if st.button("Calculate Point Properties", key="calc_point"):
         inputs = {key1: val1, key2: val2}
@@ -308,15 +310,35 @@ else:
         with st.expander("📈 View Psychrometric Chart", expanded=True):
             try:
                 fig, ax = plot_psychro_chart(pressure_pa); plot_points(ax, all_states)
-                color_mixing = '#FFA500'; color_cooling = 'blue'; color_heating = 'red'; color_reheat = '#FF00FF'; color_humid = '#00CED1'; color_fan = '#8B0000'
+                color_mixing = '#FFA500'; color_cooling = 'blue'; color_heating = 'red'; color_reheat = '#FF00FF'; color_humid = '#00CED1'; color_fan = '#8B0000'; color_shr = 'magenta'
+
+                # Plot SHR Line for cooling processes
+                if mode == 'Cooling' and metrics and metrics.get('shr') is not None:
+                    coil_start_state = None
+                    if isinstance(model_to_display, AHUModel):
+                        coil_start_state = model_to_display.get_state("MA")
+                    elif isinstance(model_to_display, FCUModel):
+                        coil_start_state = model_to_display.get_state("Entering")
+                    
+                    if coil_start_state:
+                        plot_shr_line(ax, coil_start_state, metrics['shr'], color=color_shr)
+
+                # Plot process lines (unchanged)
                 if isinstance(model_to_display, AHUModel):
-                    plot_process(ax, model_to_display.get_process_line("OA", "MA"), color=color_mixing, style='--'); plot_process(ax, model_to_display.get_process_line("RA", "MA"), color=color_mixing, style='--'); plot_process(ax, model_to_display.get_process_line("MA", "CC_Out"), color=color_cooling); plot_process(ax, model_to_display.get_process_line("CC_Out", "HC_Out"), color=color_reheat); plot_process(ax, model_to_display.get_process_line("MA", "HC_Out"), color=color_heating); plot_process(ax, model_to_display.get_process_line("HC_Out", "HUM_Out"), color=color_humid); state_before_fan = model_to_display.get_state("HUM_Out") or model_to_display.get_state("HC_Out"); final_supply_state = model_to_display.get_state("SA");
+                    plot_process(ax, model_to_display.get_process_line("OA", "MA"), color=color_mixing, style='--')
+                    plot_process(ax, model_to_display.get_process_line("RA", "MA"), color=color_mixing, style='--'); plot_process(ax, model_to_display.get_process_line("MA", "CC_Out"), color=color_cooling); plot_process(ax, model_to_display.get_process_line("CC_Out", "HC_Out"), color=color_reheat); plot_process(ax, model_to_display.get_process_line("MA", "HC_Out"), color=color_heating); plot_process(ax, model_to_display.get_process_line("HC_Out", "HUM_Out"), color=color_humid); state_before_fan = model_to_display.get_state("HUM_Out") or model_to_display.get_state("HC_Out"); final_supply_state = model_to_display.get_state("SA");
                     if state_before_fan and final_supply_state: plot_process(ax, [state_before_fan, final_supply_state], color=color_fan)
                 elif isinstance(model_to_display, FCUModel):
                      coil_line = model_to_display.get_process_line("Entering", "Coil_Out");
                      if coil_line: line_color = color_cooling if coil_line[1].tdb < coil_line[0].tdb else color_heating; plot_process(ax, coil_line, color=line_color)
                      state_before_fan_fcu = model_to_display.get_state("Coil_Out"); final_supply_state_fcu = model_to_display.get_state("Supply");
                      if state_before_fan_fcu and final_supply_state_fcu: plot_process(ax, [state_before_fan_fcu, final_supply_state_fcu], color=color_fan)
-                ax.legend(title="State Points", fontsize='small', loc='upper left', bbox_to_anchor=(1.01, 1.02)); st.pyplot(fig, clear_figure=True)
+                handles, labels = ax.get_legend_handles_labels()
+                point_handles = [h for h, l in zip(handles, labels) if "→" not in l]
+                point_labels = [l for l in labels if "→" not in l]
+                ax.legend(handles=point_handles, labels=point_labels,
+                         title="State Points & SHR", fontsize='small',
+                         loc='upper left', bbox_to_anchor=(1.01, 1.02))
+                st.pyplot(fig, clear_figure=True)
             except Exception as e: st.error(f"Could not generate psychrometric chart: {e}"); log.error(f"Streamlit Plotting Error:", exc_info=True)
     else: st.warning(f"No valid state points calculated for {model_name}.")

@@ -1,5 +1,7 @@
-streamlit>=1.24.0
-pandas>=1.5.0
-matplotlib>=3.5.0
-numpy>=1.21.0
-psychrolib>=2.5.0
+streamlit==1.28.1
+pandas==2.1.2
+matplotlib==3.8.1
+numpy==1.26.1
+psychrolib==2.5.0
+plotly==5.18.0
+scipy==1.11.3

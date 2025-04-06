@@ -234,42 +234,97 @@ with st.sidebar:
         with st.expander("💨 Airflow & Fan", expanded=True):
             total_ahu_flow = st.number_input("Total Mass Flow (kg/s)", 0.1, 50.0, 2.0, 0.1, key="ahu_flow"); oa_flow_fraction_perc = st.slider("OA Flow Fraction (%)", 0, 100, 20, 1, key="oa_frac"); oa_flow_fraction = oa_flow_fraction_perc / 100.0; fan_temp_rise_c = st.number_input("Fan Temp Rise (°C)", 0.0, 5.0, 0.7, 0.1, key="ahu_fan_rise", help="Sensible heat gain from fan motor.")
         with st.expander("❄️🔥💧 Conditioning", expanded=True):
-            reheat_q_input = 0.0; humidifier_kg_s_input = 0.0; heating_q = 0
-            if mode == 'Cooling': st.markdown("**Cooling Coil**"); cc_adp = st.number_input("Coil ADP (°C)", 0.0, 20.0, 10.0, 0.5, key="ahu_cc_adp"); cc_bf = st.slider("Bypass Factor", 0.0, 1.0, 0.1, 0.01, key="ahu_cc_bf"); st.markdown("**Reheat Coil (Optional)**"); reheat_q_input = st.number_input("Sensible Heat Added (W)", 0, 50000, 0, 100, key="ahu_reheat_q")
-            elif mode == 'Heating': st.markdown("**Heating Coil**"); heating_q = st.number_input("Sensible Heat Added (W)", 0, 100000, 15000, 100, key="ahu_hc_q")
-            st.markdown("**Steam Humidifier (Optional)**"); humidifier_enabled = st.checkbox("Enable Humidifier", key="ahu_hum_enable", value=False);
-            if humidifier_enabled: humidifier_kg_h = st.number_input("Water Added (kg/h)", 0.0, 100.0, 5.0, 0.1, key="ahu_hum_kg_h"); humidifier_kg_s_input = humidifier_kg_h / 3600.0
+            reheat_q_input = 0.0
+            humidifier_type_selected = "None"
+            humidifier_param_input = 0.0
+            heating_q = 0
+
+            if mode == 'Cooling':
+                st.markdown("**Cooling Coil**")
+                cc_adp = st.number_input("Coil ADP (°C)", 0.0, 20.0, 10.0, 0.5, key="ahu_cc_adp")
+                cc_bf = st.slider("Bypass Factor", 0.0, 1.0, 0.1, 0.01, key="ahu_cc_bf")
+                st.markdown("**Reheat Coil (Optional)**")
+                reheat_q_input = st.number_input("Sensible Heat Added (W)", 0, 50000, 0, 100, key="ahu_reheat_q")
+            elif mode == 'Heating':
+                st.markdown("**Heating Coil**")
+                heating_q = st.number_input("Sensible Heat Added (W)", 0, 100000, 15000, 100, key="ahu_hc_q")
+
+            # --- Humidifier Selection ---
+            st.markdown("**Humidifier (Optional)**")
+            humidifier_type_selected = st.radio(
+                "Humidifier Type",
+                options=["None", "Steam", "Adiabatic"],
+                key="ahu_hum_type",
+                horizontal=True,
+                help="Select humidifier type. Steam adds heat and moisture. Adiabatic cools and adds moisture (evaporative)."
+            )
+
+            if humidifier_type_selected == "Steam":
+                humidifier_kg_h = st.number_input(
+                    "Steam Water Added (kg/h)", 0.0, 100.0, 5.0, 0.1,
+                    key="ahu_hum_steam_kg_h",
+                    help="Mass flow rate of steam injected."
+                )
+                humidifier_param_input = humidifier_kg_h / 3600.0 # Convert to kg/s
+            elif humidifier_type_selected == "Adiabatic":
+                humidifier_param_input = st.slider(
+                    "Adiabatic Effectiveness", 0.0, 1.0, 0.85, 0.01,
+                    key="ahu_hum_adiabatic_eff",
+                    help="Effectiveness of the adiabatic humidifier (0 to 1)."
+                )
+            # --- End Humidifier Selection ---
+
         st.divider(); st.markdown("*(3) Calculate*")
         if st.button("▶️ Calculate AHU States", key="calc_ahu", use_container_width=True):
             st.session_state.fcu_model = None; st.session_state.calculated_metrics = {}; st.session_state.direct_calc_result = None; st.session_state.last_total_flow = 0
-            ahu = AHUModel(pressure_pa=pressure_pa); inlet_ok = ahu.set_inlet_conditions(oa_tdb=oa_tdb, oa_rh=oa_rh, ra_tdb=ra_tdb, ra_rh=ra_rh)
+            ahu = AHUModel(pressure_pa=pressure_pa)
+            inlet_ok = ahu.set_inlet_conditions(oa_tdb=oa_tdb, oa_rh=oa_rh, ra_tdb=ra_tdb, ra_rh=ra_rh)
             if inlet_ok:
-                oa_mass_flow = total_ahu_flow * oa_flow_fraction; ra_mass_flow = total_ahu_flow * (1.0 - oa_flow_fraction); success = False
+                oa_mass_flow = total_ahu_flow * oa_flow_fraction
+                ra_mass_flow = total_ahu_flow * (1.0 - oa_flow_fraction)
+                success = False
                 with st.spinner("Calculating AHU cycle..."):
                     try:
+                        # Pass humidifier type and parameter to cycle methods
                         if mode == 'Cooling':
-                            success = ahu.run_cooling_cycle( oa_mass_flow, ra_mass_flow, cc_adp, cc_bf, reheat_q_watts=reheat_q_input, humidifier_water_kg_s=humidifier_kg_s_input, fan_heat_watts=0)
+                            success = ahu.run_cooling_cycle(
+                                oa_mass_flow, ra_mass_flow, cc_adp, cc_bf,
+                                reheat_q_watts=reheat_q_input,
+                                humidifier_type=humidifier_type_selected, # Pass type
+                                humidifier_param=humidifier_param_input, # Pass value
+                                fan_heat_watts=0 # Fan heat applied later
+                            )
+                            # ... (rest of cooling cycle logic, fan heat, metrics) ...
                             if success:
-                                fan_heat_input_state = ahu.get_state("HUM_Out")
+                                fan_heat_input_state = ahu.get_state("HUM_Out") # State before fan is always HUM_Out now
                                 if fan_temp_rise_c > 0 and fan_heat_input_state:
                                     fan_q_watts = calculate_fan_heat(total_ahu_flow, fan_temp_rise_c, fan_heat_input_state)
                                     sa_state = hvac.sensible_heat(fan_heat_input_state, fan_q_watts, total_ahu_flow)
                                     if sa_state: ahu.states["SA"] = sa_state
-                                    else: success = False # Mark as failed if fan heat fails
+                                    else: success = False
                                 if success: cc_in = ahu.get_state("MA"); cc_out = ahu.get_state("CC_Out"); st.session_state.calculated_metrics = calculate_coil_metrics(cc_in, cc_out, total_ahu_flow)
+
                         elif mode == 'Heating':
-                            success = ahu.run_heating_cycle( oa_mass_flow, ra_mass_flow, heating_q, humidifier_water_kg_s=humidifier_kg_s_input, fan_heat_watts=0 )
+                            success = ahu.run_heating_cycle(
+                                oa_mass_flow, ra_mass_flow, heating_q,
+                                humidifier_type=humidifier_type_selected, # Pass type
+                                humidifier_param=humidifier_param_input, # Pass value
+                                fan_heat_watts=0 # Fan heat applied later
+                            )
+                            # ... (rest of heating cycle logic, fan heat) ...
                             if success:
-                                fan_heat_input_state = ahu.get_state("HUM_Out")
+                                fan_heat_input_state = ahu.get_state("HUM_Out") # State before fan is always HUM_Out now
                                 if fan_temp_rise_c > 0 and fan_heat_input_state:
                                      fan_q_watts = calculate_fan_heat(total_ahu_flow, fan_temp_rise_c, fan_heat_input_state)
                                      sa_state = hvac.sensible_heat(fan_heat_input_state, fan_q_watts, total_ahu_flow)
                                      if sa_state: ahu.states["SA"] = sa_state
                                      else: success = False
+
+                        # ... (rest of button callback logic: success/error messages) ...
                         if success and ahu.get_all_states(): st.session_state.ahu_model = ahu; st.session_state.last_total_flow = total_ahu_flow; st.success(f"AHU {mode} cycle calculated!", icon="✅")
                         else: st.session_state.ahu_model = None; st.session_state.last_total_flow = 0; st.error("AHU calculation failed. Check inputs/steps.", icon="❌")
                     except Exception as e: st.session_state.ahu_model = None; st.error(f"Calc error: {e}", icon="🔥"); log.error(f"Streamlit AHU Calc Error:", exc_info=True)
-            else: st.error("Failed to set inlet conditions.", icon="⚠️") # This else aligns with 'if inlet_ok:'
+            else: st.error("Failed to set inlet conditions.", icon="⚠️")
 
     elif system_type == 'FCU':
         with st.expander("🌀 Inlet Air Condition", expanded=True): st.markdown("**Entering Air (e.g., Room Air)**"); room_tdb = st.number_input("Tdb (°C)", 10.0, 40.0, 25.0, 0.5, key="fcu_tdb"); room_rh_perc = st.slider("Entering RH (%)", 0, 100, 55, 1, key="fcu_rh"); room_rh = room_rh_perc / 100.0

@@ -15,7 +15,7 @@ try:
     from psychro_app.core.air_state import AirState
     from psychro_app.systems.ahu_model import AHUModel
     from psychro_app.systems.fcu_model import FCUModel
-    from psychro_app.utils.plotter import plot_psychro_chart, plot_points, plot_process
+    from psychro_app.utils.plotter import plot_psychro_chart, plot_points, plot_process, plot_shr_line # Ensure plot_shr_line is imported
     from psychro_app.utils import constants
     from psychro_app.processes import hvac_processes as hvac
 except ModuleNotFoundError:
